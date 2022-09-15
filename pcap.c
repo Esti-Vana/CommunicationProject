@@ -18,18 +18,17 @@ int max_number_of_connections, max_number_of_transaction_per_video, video_connec
 
 FILE *p_videos_data_file;
 FILE *p_output_file;
-struct DataItem **hashArray;
-struct DataItem *item;
+struct ConnDataItem **hashArray;
+struct ConnDataItem *item;
 int connection_id_index = 0, timer = -1;
 // the list contains open connections funcs: printList, insertFirst, delete
-struct node *head = NULL;
-struct node *current = NULL;
+struct node_conn_list *head = NULL;
+struct node_conn_list *current = NULL;
 struct video *p_video_data;
 struct video
 {
    int num_videos_watched, Sum_size_of_videos, Sum_number_of_TDRs;
 };
-
 struct conn_data
 {
    char buffer[BUFFER_SIZE];
@@ -46,18 +45,18 @@ struct Transaction_data
    int max_packet_size_inbound, min_packet_size_inbound;
    int max_diff_time_inbound, min_diff_time_inbound, last_packet_time, RTT_m, RTT_ms;
 };
-struct DataItem
+struct ConnDataItem
 {
 
    struct conn_data *p_conn_data;
    struct Transaction_data *p_transaction_data;
    int key;
-   struct DataItem *next;
+   struct ConnDataItem *next;
 };
-struct node
+struct node_conn_list
 {
    int hashIndex, conn_id;
-   struct node *next;
+   struct node_conn_list *next;
 };
 /* The ethernet header */
 struct sniff_ethernet
@@ -107,24 +106,34 @@ char *convert_apoch_time(long apoch_time)
    if (newtime->tm_hour == 0)
       newtime->tm_hour = 12;
    char *buff = malloc(sizeof(char) * 50);
+   if (buff == NULL)
+   {
+      printf("Allocation fault");
+      exit(1);
+   }
    sprintf(buff, "%.19s %s  %i", asctime(newtime), am_pm, 1900 + newtime->tm_year);
    return buff;
 }
-void insertFirst(int hashIndex, int conn_id)
+void insert_to_List(int hashIndex, int conn_id)
 {
    // insert the connection insert at the beginning of the list
-   struct node *link = (struct node *)malloc(sizeof(struct node));
+   struct node_conn_list *link = (struct node_conn_list *)malloc(sizeof(struct node_conn_list));
+   if (link == NULL)
+   {
+      printf("Allocation fault");
+      exit(1);
+   }
    link->hashIndex = hashIndex;
    link->conn_id = conn_id;
    link->next = head;
    head = link;
 }
-struct node *delete_connection_from_list(int conn_id)
+struct node_conn_list *delete_connection_from_list(int conn_id)
 {
    // Delete the connection when it is closed
 
-   struct node *current = head;
-   struct node *previous = NULL;
+   struct node_conn_list *current = head;
+   struct node_conn_list *previous = NULL;
    if (head == NULL)
       return NULL;
    // navigate through list
@@ -139,7 +148,7 @@ struct node *delete_connection_from_list(int conn_id)
          current = current->next;
       }
    }
-   // found a match, update the link
+   // found a match, update the list
    if (current == head)
       head = head->next;
    else
@@ -176,7 +185,7 @@ void write_to_buffer_transaction_data(struct Transaction_data *p_transaction_dat
 void delete_connection_from_Hash(int hashIndex, int conn_id)
 {
    int MBs = 1024 * 1024 * minimum_video_connection_size, is_head = 0;
-   struct DataItem *head = hashArray[hashIndex], *prev = NULL;
+   struct ConnDataItem *head = hashArray[hashIndex], *prev = NULL;
    // if there isn't this connection
    if (head == NULL)
       return NULL;
@@ -199,7 +208,7 @@ void delete_connection_from_Hash(int hashIndex, int conn_id)
 
    if (head->p_conn_data->conn_size >= MBs)
    {
-      // send the last transation to write in buufer and dump all data to the file
+      // send the last transation to write in bufer and dump all data to the file
       write_to_buffer_transaction_data(head->p_transaction_data, head->p_conn_data);
       fprintf(p_output_file, "%s", head->p_conn_data->buffer);
       fflush(p_output_file);
@@ -213,8 +222,8 @@ void delete_connection_from_Hash(int hashIndex, int conn_id)
 }
 void timer_delete_Inactive_connections(int arrival_time)
 {
-   struct node *temp2 = head;
-   struct DataItem *temp3 = NULL;
+   struct node_conn_list *temp2 = head;
+   struct ConnDataItem *temp3 = NULL;
    // go over all open connection list and find the connections that have not received packets
    while (temp2 != NULL)
    {
@@ -232,7 +241,7 @@ void timer_delete_Inactive_connections(int arrival_time)
    }
    timer = arrival_time;
 }
-void insert(struct conn_data *p_conn_data, int in_range, int is_server, int arrival_time, int arrival_time_ms, int size_packet)
+void insert_packet_to_Hash(struct conn_data *p_conn_data, int in_range, int is_server, int arrival_time, int arrival_time_ms, int size_packet)
 {
    int hashIndex, diff_time;
    // find the hasn number
@@ -242,7 +251,7 @@ void insert(struct conn_data *p_conn_data, int in_range, int is_server, int arri
    if (timer < arrival_time - video_connection_timeout)
       timer_delete_Inactive_connections(arrival_time);
 
-   struct DataItem *temp = hashArray[hashIndex];
+   struct ConnDataItem *temp = hashArray[hashIndex];
    // if its packet from server, or from client- but not request.
    if (in_range != 1 || is_server != 0)
    {
@@ -323,12 +332,22 @@ void insert(struct conn_data *p_conn_data, int in_range, int is_server, int arri
       }
 
       // init connection data
-      struct DataItem *item;
-      item = (struct DataItem *)malloc(sizeof(struct DataItem));
+      struct ConnDataItem *item;
+      item = (struct ConnDataItem *)malloc(sizeof(struct ConnDataItem));
+      if (item == NULL)
+      {
+         printf("Allocation fault");
+         exit(1);
+      }
       item->p_conn_data = p_conn_data;
       item->key = hashIndex;
       item->p_conn_data->conn_id = ++connection_id_index;
       item->p_transaction_data = (struct Transaction_data *)malloc(sizeof(struct Transaction_data));
+      if (item->p_transaction_data == NULL)
+      {
+         printf("Allocation fault");
+         exit(1);
+      }
       item->p_transaction_data->Start_time = arrival_time;
       item->p_transaction_data->Start_time_ms = arrival_time_ms;
       item->p_transaction_data->Transaction_id = 1;
@@ -345,7 +364,7 @@ void insert(struct conn_data *p_conn_data, int in_range, int is_server, int arri
       p_video_data->num_videos_watched = connection_id_index;
       p_video_data->Sum_number_of_TDRs++;
       // insert the new connection to the list of open connections
-      insertFirst(hashIndex, item->p_conn_data->conn_id);
+      insert_to_List(hashIndex, item->p_conn_data->conn_id);
       // insert the new connection to the hash table
       if (temp != NULL)
       {
@@ -364,7 +383,7 @@ void insert(struct conn_data *p_conn_data, int in_range, int is_server, int arri
 }
 void free_data()
 {
-   struct DataItem *head, *prev = NULL;
+   struct ConnDataItem *head, *prev = NULL;
    // go over the hash table and free the items that not null.
    for (size_t i = 0; i < max_number_of_connections; i++)
    {
@@ -416,12 +435,22 @@ int main(int argc, char *argv[])
    // read data from pcap file
    char errbuff[BUDDER_ERR_SIZE];
    pcap_t *p_pcapfile_data = pcap_open_offline("data.pcap", errbuff);
-   hashArray = (struct DataItem **)malloc(sizeof(struct DataItem *) * max_number_of_connections);
+   hashArray = (struct ConnDataItem **)malloc(sizeof(struct ConnDataItem *) * max_number_of_connections);
+   if (hashArray == NULL)
+   {
+      printf("Allocation fault");
+      exit(1);
+   }
    p_output_file = fopen("out-data.csv", "w");
 
-   //open video data file and init Global variable
+   // open video data file and init Global variable
    p_videos_data_file = fopen("video-data.csv", "w");
-   p_video_data=(struct video*)malloc(sizeof(struct video));
+   p_video_data = (struct video *)malloc(sizeof(struct video));
+   if (p_video_data == NULL)
+   {
+      printf("Allocation fault");
+      exit(1);
+   }
    p_video_data->Sum_size_of_videos = 0;
    p_video_data->Sum_number_of_TDRs = 0;
 
@@ -459,6 +488,11 @@ int main(int argc, char *argv[])
       dport = ntohs(p_udp_header->dport);
       ip_source = strdup(inet_ntoa(p_header_ip->ip_src));
       ip_dest = strdup(inet_ntoa(p_header_ip->ip_dst));
+      if (ip_source == NULL || ip_dest == NULL)
+      {
+         printf("Allocation fault");
+         exit(1);
+      }
       protocol_packet = p_header_ip->ip_p;
 
       apoch_time_s = p_header_packet->ts.tv_sec;
@@ -468,6 +502,11 @@ int main(int argc, char *argv[])
       if ((sport == 443 || dport == 443) && protocol_packet == 17)
       {
          struct conn_data *p_conn_data = (struct conn_data *)malloc(sizeof(struct conn_data));
+         if (p_conn_data == NULL)
+         {
+            printf("Allocation fault");
+            exit(1);
+         }
          p_conn_data->protocol = 17;
 
          // if the server send the packet
@@ -483,13 +522,13 @@ int main(int argc, char *argv[])
             {
                in_range = 1;
                is_server = 1;
-               insert(p_conn_data, in_range, is_server, apoch_time_s, apoch_time_ms, size_packet);
+               insert_packet_to_Hash(p_conn_data, in_range, is_server, apoch_time_s, apoch_time_ms, size_packet);
             }
             else
             {
                in_range = 0;
                is_server = 1;
-               insert(p_conn_data, in_range, is_server, apoch_time_s, apoch_time_ms, size_packet);
+               insert_packet_to_Hash(p_conn_data, in_range, is_server, apoch_time_s, apoch_time_ms, size_packet);
             }
          }
          else
@@ -505,19 +544,19 @@ int main(int argc, char *argv[])
             {
                in_range = 1;
                is_server = 0;
-               insert(p_conn_data, in_range, is_server, apoch_time_s, apoch_time_ms, size_packet);
+               insert_packet_to_Hash(p_conn_data, in_range, is_server, apoch_time_s, apoch_time_ms, size_packet);
             }
             else
             {
                in_range = 0;
                is_server = 0;
-               insert(p_conn_data, in_range, is_server, apoch_time_s, apoch_time_ms, size_packet);
+               insert_packet_to_Hash(p_conn_data, in_range, is_server, apoch_time_s, apoch_time_ms, size_packet);
             }
          }
       }
    }
    // Delete all connections that remain open
-   struct node *temp = head, *prev;
+   struct node_conn_list *temp = head, *prev;
    while (temp != NULL)
    {
       delete_connection_from_Hash(temp->hashIndex, temp->conn_id);
@@ -540,7 +579,7 @@ int main(int argc, char *argv[])
 void display_hash_table()
 {
    int i = 0;
-   struct DataItem *head = hashArray[i];
+   struct ConnDataItem *head = hashArray[i];
    for (i = 0; i < max_number_of_connections; i++)
    {
       if (hashArray[i] != NULL)
@@ -559,7 +598,7 @@ void display_hash_table()
 }
 void printList()
 {
-   struct node *ptr = head;
+   struct node_conn_list *ptr = head;
 
    // start from the beginning
    while (ptr != NULL)
