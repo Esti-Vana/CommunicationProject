@@ -566,9 +566,9 @@ int main(int argc, char *argv[])
    }
 
    // print the videos data to file
-   fprintf(p_videos_data_file, "count videos, size of videos,average num TDRs\n");
+   fprintf(p_videos_data_file, "count_videos,size_of_videos,average_num_TDRs\n");
    count_conn = p_video_data->num_videos_watched;
-   fprintf(p_videos_data_file, "%d, %d, %d\n", count_conn, p_video_data->Sum_size_of_videos / count_conn, p_video_data->Sum_number_of_TDRs / count_conn);
+   fprintf(p_videos_data_file, "%d,%d,%d\n", count_conn, p_video_data->Sum_size_of_videos / count_conn, p_video_data->Sum_number_of_TDRs / count_conn);
 
    free_data();
    fclose(p_videos_data_file);
